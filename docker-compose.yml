@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: dw
+      POSTGRES_USER: dw_user
+      POSTGRES_PASSWORD: dw_pass
+
+  etl:
+    build: .
+    volumes:
+      - ./data-lake:/data-lake
+    depends_on:
+      - postgres
