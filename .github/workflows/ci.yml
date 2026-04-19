@@ -20,6 +20,9 @@ jobs:
           docker --version
           docker compose version
 
+      - name: Buildar imagem ETL
+        run: docker compose build etl
+
       - name: Subir PostgreSQL
         run: docker compose up -d postgres
 
@@ -38,7 +41,7 @@ jobs:
           docker compose logs postgres
           exit 1
 
-      - name: Buildar e executar pipeline ETL
+      - name: Executar pipeline ETL
         run: docker compose run --rm etl
 
       - name: Validar arquivos gerados no Data Lake
@@ -48,6 +51,12 @@ jobs:
           test -f data-lake/rating.csv
           echo "Arquivos gerados com sucesso:"
           ls -lah data-lake
+
+      - name: Validar tabelas carregadas no PostgreSQL
+        run: |
+          docker compose exec -T postgres psql -U dw_user -d dw -c "SELECT COUNT(*) AS movie_rows FROM movie;"
+          docker compose exec -T postgres psql -U dw_user -d dw -c "SELECT COUNT(*) AS users_rows FROM users;"
+          docker compose exec -T postgres psql -U dw_user -d dw -c "SELECT COUNT(*) AS rating_rows FROM rating;"
 
       - name: Mostrar prévia dos CSVs
         run: |
