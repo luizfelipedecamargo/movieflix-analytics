@@ -95,6 +95,23 @@ jobs:
       ready: ${{ steps.check.outputs.ready }}
 
     steps:
+      - name: Diagnóstico seguro das credenciais do Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ]; then
+            echo "DOCKERHUB_USERNAME configurado: $DOCKERHUB_USERNAME"
+          else
+            echo "DOCKERHUB_USERNAME não está configurado."
+          fi
+
+          if [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "DOCKERHUB_TOKEN configurado: sim"
+          else
+            echo "DOCKERHUB_TOKEN configurado: não"
+          fi
+
       - name: Verificar credenciais do Docker Hub
         id: check
         env:
