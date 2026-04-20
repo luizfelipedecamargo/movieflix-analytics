@@ -1,4 +1,4 @@
-# Workflow de validação e publicação do pipeline
+# Workflow de validação e publicação do pipeline (gatilho técnico para nova execução)
 name: CI/CD - Movie Data Pipeline
 
 on:
