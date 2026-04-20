@@ -1,6 +1,6 @@
 # 🎬 Movie Data Pipeline
 
-Pipeline de dados com Python, Docker, Docker Compose, PostgreSQL e GitHub Actions.
+Pipeline de dados com Python, Docker, Docker Compose, PostgreSQL, GitHub Actions e publicação no Docker Hub.
 
 Este repositório demonstra um fluxo completo de engenharia de dados:
 
@@ -11,6 +11,7 @@ Este repositório demonstra um fluxo completo de engenharia de dados:
 - carga dos dados em PostgreSQL
 - execução de consultas analíticas
 - validação automatizada via GitHub Actions
+- publicação automática da imagem no Docker Hub
 
 ---
 
@@ -24,6 +25,7 @@ A execução foi pensada para ser:
 - reprodutível com Docker
 - robusta em ambiente de CI
 - validável automaticamente no GitHub Actions
+- publicável no Docker Hub após validação
 
 ---
 
@@ -39,6 +41,8 @@ PostgreSQL (Data Warehouse)
 Consultas Analíticas (SQL)
         ↓
 Logs + validações + artifacts
+        ↓
+Build e publicação da imagem no Docker Hub
 ```
 
 ---
@@ -57,6 +61,7 @@ movieflix-analytics/
 │   └── run_analytics.py
 ├── data-lake/
 │   └── .gitkeep
+├── .dockerignore
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md
@@ -499,6 +504,24 @@ COPY app/ /app/
 CMD ["sh", "-c", "python collect_and_generate.py && python load_to_postgres.py && python run_analytics.py"]
 ```
 
+### 🔹 `.dockerignore`
+
+Esse arquivo evita enviar arquivos desnecessários para o contexto de build, o que ajuda no build local e também na publicação da imagem no Docker Hub.
+
+```dockerignore
+.git
+.github
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.env
+.venv/
+venv/
+data-lake/*.csv
+```
+
 ---
 
 ## ✅ Passo 5 — Orquestração com Docker Compose
@@ -591,9 +614,9 @@ Isso confirma que:
 
 ---
 
-## 🤖 CI com GitHub Actions
+## 🤖 CI/CD com GitHub Actions
 
-O projeto possui um workflow de validação automática em:
+O projeto possui um workflow de validação e publicação automática em:
 
 ```text
 .github/workflows/ci.yml
@@ -605,7 +628,7 @@ A cada `push`, `pull_request` ou execução manual, o GitHub Actions:
 
 1. faz checkout do código
 2. exibe a versão do Docker e Docker Compose
-3. builda a imagem ETL
+3. builda a imagem ETL para validação
 4. sobe o PostgreSQL
 5. aguarda o banco ficar pronto
 6. executa o pipeline ETL real
@@ -613,13 +636,15 @@ A cada `push`, `pull_request` ou execução manual, o GitHub Actions:
 8. valida as tabelas carregadas no PostgreSQL
 9. exibe prévia dos CSVs no log
 10. publica os CSVs como artifact
-11. exibe logs dos containers
-12. encerra os containers ao final
+11. publica a imagem no Docker Hub quando a execução não for `pull_request` e as credenciais estiverem configuradas
+12. exibe logs dos containers
+13. encerra os containers ao final
 
-### 🔹 ` .github/workflows/ci.yml `
+### 🔹 `.github/workflows/ci.yml`
 
 ```yaml
-name: CI - Movie Data Pipeline
+# Workflow de validação e publicação do pipeline
+name: CI/CD - Movie Data Pipeline
 
 on:
   push:
@@ -628,13 +653,16 @@ on:
     branches: ["master", "main"]
   workflow_dispatch:
 
+env:
+  IMAGE_REPOSITORY: movieflix-analytics
+
 jobs:
   validate-pipeline:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Exibir versões do Docker
         run: |
@@ -689,7 +717,7 @@ jobs:
           head -n 5 data-lake/rating.csv
 
       - name: Publicar artefatos do Data Lake
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: data-lake-csvs
           path: data-lake/*.csv
@@ -702,14 +730,150 @@ jobs:
       - name: Encerrar containers
         if: always()
         run: docker compose down -v
+
+  publish-docker-image:
+    name: Publicar imagem no Docker Hub
+    runs-on: ubuntu-latest
+    needs: validate-pipeline
+    if: >
+      vars.DOCKERHUB_USERNAME != '' &&
+      secrets.DOCKERHUB_TOKEN != '' &&
+      github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v6
+
+      - name: Definir tags da imagem
+        id: meta
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          BRANCH_TAG="${GITHUB_REF_NAME//\//-}"
+          IMAGE_NAME="${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_REPOSITORY }}"
+          echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${IMAGE_NAME}:latest" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "branch_tag=${IMAGE_NAME}:${BRANCH_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Login no Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build e push da imagem
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.latest_tag }}
+            ${{ steps.meta.outputs.sha_tag }}
+            ${{ steps.meta.outputs.branch_tag }}
+          labels: |
+            org.opencontainers.image.title=movieflix-analytics
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Resumo da publicação
+        run: |
+          echo "Imagem publicada com sucesso:"
+          echo "- ${{ steps.meta.outputs.latest_tag }}"
+          echo "- ${{ steps.meta.outputs.sha_tag }}"
+          echo "- ${{ steps.meta.outputs.branch_tag }}"
 ```
 
-### Observações importantes sobre o CI
+---
 
-- neste momento o workflow **não publica imagem no Docker Hub**
-- não há necessidade de configurar `DOCKERHUB_USERNAME` ou `DOCKERHUB_TOKEN`
-- o foco atual do workflow é validar a execução real do pipeline
-- os CSVs gerados ficam disponíveis como artifact do job
+## 🔐 Configuração do Docker Hub no GitHub
+
+Para a publicação funcionar, configure no repositório GitHub:
+
+### 1. Variável do repositório
+
+Caminho:
+
+```text
+Settings → Secrets and variables → Actions → Variables → New repository variable
+```
+
+Crie:
+
+- **Name:** `DOCKERHUB_USERNAME`
+- **Value:** seu usuário do Docker Hub
+
+### 2. Secret do repositório
+
+Caminho:
+
+```text
+Settings → Secrets and variables → Actions → Secrets → New repository secret
+```
+
+Crie:
+
+- **Name:** `DOCKERHUB_TOKEN`
+- **Value:** token de acesso pessoal do Docker Hub
+
+---
+
+## 🐳 Preparar o Docker Hub
+
+Antes do primeiro push automático:
+
+1. acesse o Docker Hub
+2. crie o repositório `movieflix-analytics`
+3. defina se ele será público ou privado
+4. gere um token com permissão de leitura e escrita
+
+---
+
+## 🏷️ Tags publicadas automaticamente
+
+Quando o job de publicação roda com sucesso, ele envia a imagem com três tags:
+
+- `latest`
+- `sha-<7 primeiros caracteres do commit>`
+- `<nome-da-branch>`
+
+Exemplo:
+
+```text
+seu_usuario/movieflix-analytics:latest
+seu_usuario/movieflix-analytics:sha-abc1234
+seu_usuario/movieflix-analytics:master
+```
+
+---
+
+## ▶️ Como publicar a imagem automaticamente
+
+A publicação acontece automaticamente quando:
+
+- o workflow valida o pipeline com sucesso
+- o evento não é `pull_request`
+- `DOCKERHUB_USERNAME` está configurado como variável
+- `DOCKERHUB_TOKEN` está configurado como secret
+
+Na prática, um `push` em `master` ou `main` já pode disparar a publicação.
+
+---
+
+## ▶️ Como baixar e executar a imagem publicada
+
+Depois da publicação no Docker Hub, a imagem pode ser baixada com:
+
+```bash
+docker pull SEU_USUARIO/movieflix-analytics:latest
+```
+
+E executada com:
+
+```bash
+docker run --rm SEU_USUARIO/movieflix-analytics:latest
+```
+
+> Observação: a imagem executa os scripts ETL e analytics, mas para a carga e consultas funcionarem corretamente ela precisa alcançar um PostgreSQL disponível conforme a configuração do projeto.
 
 ---
 
@@ -738,6 +902,7 @@ Na aba **Actions** do GitHub, selecione o workflow e use **Run workflow**.
 - SQL analítico
 - Docker e Docker Compose
 - validação automatizada em CI
+- publicação automatizada de imagem no Docker Hub
 - observabilidade por logs e artifacts
 
 ---
@@ -750,5 +915,5 @@ Evoluções naturais para este projeto:
 - separar camadas raw / trusted / analytics
 - adicionar testes unitários para os scripts Python
 - agendar execução recorrente do pipeline
-- publicar imagem no Docker Hub quando necessário
+- publicar também imagens versionadas por release
 - adicionar monitoramento e alertas
