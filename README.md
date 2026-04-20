@@ -321,11 +321,4 @@ A cada `push`, `pull_request` ou execução manual, o GitHub Actions:
 
 ---
 
-## 📦 Próximos passos possíveis
 
-- versionar esquema do banco
-- separar camadas raw / trusted / analytics
-- adicionar testes unitários para os scripts Python
-- agendar execução recorrente do pipeline
-- publicar também imagens versionadas por release
-- adicionar monitoramento e alertas
